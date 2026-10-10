@@ -22,12 +22,17 @@ A high-performance, ultra-low latency mobile keyboard and touchpad for your Wind
 
 ## 🚀 Quick Start Guide
 
-### Step 1: Start Companion Server on Laptop
-Simply double-click the one-click batch launcher in the project root:
+### Step 1: Start Companion App on Laptop
+Simply double-click the standalone Desktop GUI app:
+```
+ADBKeyboardCompanion.exe
+```
+*(No Python or terminal required! It shows live ADB connection status, mobile client status, and real-time keystroke stream)*
+
+Alternatively, you can also run:
 ```cmd
 start-companion.bat
 ```
-*(Or run `npm run companion` / `python server/companion_server.py`)*
 
 This script automatically:
 - Verifies your connected device via `adb devices`
