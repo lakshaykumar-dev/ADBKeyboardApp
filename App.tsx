@@ -618,12 +618,14 @@ function KeyboardApp() {
 
             <Text style={styles.categoryTitle}>Windows & Navigation</Text>
             <View style={styles.grid2}>
+              <ShortcutCard title="Clipboard History" shortcut="Win + V" onPress={() => handleShortcut(['win', 'v'])} />
               <ShortcutCard title="Show Desktop" shortcut="Win + D" onPress={() => handleShortcut(['win', 'd'])} />
               <ShortcutCard title="File Explorer" shortcut="Win + E" onPress={() => handleShortcut(['win', 'e'])} />
               <ShortcutCard title="Run Dialog" shortcut="Win + R" onPress={() => handleShortcut(['win', 'r'])} />
               <ShortcutCard title="Switch App" shortcut="Alt + Tab" onPress={() => handleShortcut(['alt', 'tab'])} />
               <ShortcutCard title="Close Window" shortcut="Alt + F4" onPress={() => handleShortcut(['alt', 'f4'])} />
               <ShortcutCard title="Task Manager" shortcut="Ctrl+Shift+Esc" onPress={() => handleShortcut(['ctrl', 'shift', 'escape'])} />
+              <ShortcutCard title="Lock Laptop" shortcut="Win + L" onPress={() => handleShortcut(['win', 'l'])} />
               <ShortcutCard title="New Tab" shortcut="Ctrl + T" onPress={() => handleShortcut(['ctrl', 't'])} />
               <ShortcutCard title="Close Tab" shortcut="Ctrl + W" onPress={() => handleShortcut(['ctrl', 'w'])} />
             </View>
