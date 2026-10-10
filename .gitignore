@@ -20,6 +20,9 @@ DerivedData
 *.hmap
 *.ipa
 *.apk
+*.exe
+dist/
+*.spec
 *.xcuserstate
 **/.xcode.env.local
 
