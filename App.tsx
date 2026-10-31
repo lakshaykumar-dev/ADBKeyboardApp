@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Animated,
+  Easing,
 } from 'react-native';
 import {
   SafeAreaProvider,
@@ -36,70 +37,107 @@ export default function App() {
 }
 
 function VoiceTextApp() {
-  // Connection states
+  // Connection state
   const [host, setHost] = useState('127.0.0.1');
   const [port, setPort] = useState('8080');
   const [connectionStatus, setConnectionStatus] = useState<ConnectionState>('disconnected');
   const [latency, setLatency] = useState<number | null>(null);
   const [hapticEnabled, setHapticEnabled] = useState(true);
 
-  // App UI states
+  // Editor & Mode state
   const [bufferText, setBufferText] = useState('');
   const [liveStreamMode, setLiveStreamMode] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [sentHistory, setSentHistory] = useState<SentItem[]>([]);
-  const [activeSnippetCategory, setActiveSnippetCategory] = useState<'dev' | 'phrases' | 'symbols'>('dev');
+  const [activeSnippetTab, setActiveSnippetTab] = useState<'terminal' | 'text' | 'code'>('terminal');
 
-  // Pulse animation for status indicator
+  // Animation values
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const inputRef = useRef<TextInput>(null);
+  const waveBars = useRef([
+    new Animated.Value(0.3),
+    new Animated.Value(0.7),
+    new Animated.Value(1.0),
+    new Animated.Value(0.5),
+    new Animated.Value(0.8),
+    new Animated.Value(0.4),
+    new Animated.Value(0.6),
+  ]).current;
 
+  const inputRef = useRef<TextInput>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const pingIntervalRef = useRef<any>(null);
   const reconnectTimeoutRef = useRef<any>(null);
 
+  // Pulsing connection dot
   useEffect(() => {
     if (connectionStatus === 'connected') {
-      Animated.loop(
+      const pulse = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 0.4,
-            duration: 1000,
+            toValue: 0.35,
+            duration: 900,
             useNativeDriver: true,
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
-            duration: 1000,
+            duration: 900,
             useNativeDriver: true,
           }),
         ])
-      ).start();
+      );
+      pulse.start();
+      return () => pulse.stop();
     } else {
       pulseAnim.setValue(1);
     }
   }, [connectionStatus, pulseAnim]);
 
-  // Haptic feedback trigger
+  // Subtle telemetry waveform animation (Industrial audio indicator)
+  useEffect(() => {
+    const anims = waveBars.map((bar, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(bar, {
+            toValue: 0.2 + (i % 3) * 0.35,
+            duration: 600 + i * 120,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: false,
+          }),
+          Animated.timing(bar, {
+            toValue: 0.8 + ((i + 1) % 3) * 0.1,
+            duration: 600 + i * 120,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: false,
+          }),
+        ])
+      )
+    );
+
+    anims.forEach((anim) => anim.start());
+    return () => anims.forEach((anim) => anim.stop());
+  }, [waveBars]);
+
+  // Tactile haptic feedback
   const triggerHaptic = useCallback(() => {
     if (hapticEnabled) {
       try {
-        Vibration.vibrate(10);
+        Vibration.vibrate(8);
       } catch {
         // Silently ignore
       }
     }
   }, [hapticEnabled]);
 
-  // Send packet to companion server
+  // Transmit payload to desktop server
   const sendPacket = useCallback((payload: any) => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify(payload));
     }
   }, []);
 
-  // Connect to WebSocket server
+  // WebSocket connection & auto-reconnect
   const connectToServer = useCallback(() => {
     if (socketRef.current) {
       try {
@@ -176,7 +214,7 @@ function VoiceTextApp() {
     };
   }, [connectToServer]);
 
-  // Send buffer text
+  // Transmit buffer
   const handleSendBuffer = useCallback(
     (textToSend: string, appendEnter: boolean = false) => {
       if (!textToSend && !appendEnter) return;
@@ -188,22 +226,21 @@ function VoiceTextApp() {
           text: textToSend,
         });
 
-        // Add to recent history
         setSentHistory((prev) => [
           {
             id: Date.now().toString(),
             text: textToSend,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
             withEnter: appendEnter,
           },
-          ...prev.slice(0, 9), // keep last 10
+          ...prev.slice(0, 9),
         ]);
       }
 
       if (appendEnter) {
         setTimeout(() => {
           sendPacket({ type: 'key_press', key: 'enter' });
-        }, 60);
+        }, 50);
       }
 
       setBufferText('');
@@ -211,7 +248,7 @@ function VoiceTextApp() {
     [triggerHaptic, sendPacket]
   );
 
-  // Live real-time typing / dictation stream
+  // Live real-time streaming
   const handleLiveTextChange = useCallback(
     (newText: string) => {
       if (!liveStreamMode) {
@@ -241,7 +278,7 @@ function VoiceTextApp() {
     [bufferText, liveStreamMode, triggerHaptic, sendPacket]
   );
 
-  // Quick single keypress / shortcut
+  // Direct keystroke action
   const handleKeyAction = useCallback(
     (keyOrShortcut: string | string[]) => {
       triggerHaptic();
@@ -254,34 +291,29 @@ function VoiceTextApp() {
     [triggerHaptic, sendPacket]
   );
 
-  // Calculate metrics
   const charCount = bufferText.length;
   const wordCount = bufferText.trim() === '' ? 0 : bufferText.trim().split(/\s+/).length;
 
-  const snippetCategories = {
-    dev: ['git status', 'git pull', 'git push', 'npm run start', 'npm run dev', 'cls', 'dir', 'cd ..', 'python app.py', 'docker ps'],
-    phrases: ['Thank you!', 'Confirmed, thank you.', 'Looking into this now.', 'Please review when possible.', 'LGTM 👍', 'All checks passed.'],
-    symbols: ['->', '=>', '{ }', '[ ]', '<!-- -->', '===', '!==', '&&', '||', '${ }'],
+  const snippets = {
+    terminal: ['git status', 'git pull', 'git push', 'npm run dev', 'cls', 'python app.py', 'docker ps'],
+    text: ['Thank you.', 'Confirmed.', 'Looking into this now.', 'Please review.', 'LGTM.'],
+    code: ['const ', 'return ', 'console.log(', '() => ', '===', '!==', 'async/await'],
   };
 
   return (
     <SafeAreaView style={styles.safeContainer} edges={['top', 'left', 'right', 'bottom']}>
       <StatusBar barStyle="light-content" />
 
-      {/* Top Header */}
+      {/* Industrial Header */}
       <View style={styles.header}>
-        <View style={styles.brandRow}>
-          <View style={styles.brandIconWrapper}>
-            <Text style={styles.brandIcon}>🎙️</Text>
-          </View>
-          <View>
-            <Text style={styles.brandTitle}>VOICE & TEXT BRIDGE</Text>
-            <Text style={styles.brandSubtitle}>ADB Laptop Remote Keyboard</Text>
-          </View>
+        <View style={styles.headerLeft}>
+          <Text style={styles.brandTitle}>FLOW</Text>
+          <Text style={styles.brandDivider}>/</Text>
+          <Text style={styles.brandSubtitle}>ADB LINK</Text>
         </View>
 
         <View style={styles.headerRight}>
-          {/* Status Badge */}
+          {/* Minimal Telemetry Status Pill */}
           <View
             style={[
               styles.statusPill,
@@ -314,20 +346,19 @@ function VoiceTextApp() {
               ]}
             >
               {connectionStatus === 'connected'
-                ? `ONLINE ${latency !== null ? `(${latency}ms)` : ''}`
+                ? `LINKED · ${latency !== null ? `${latency}MS` : 'OK'}`
                 : connectionStatus === 'connecting'
                 ? 'CONNECTING'
                 : 'OFFLINE'}
             </Text>
           </View>
 
-          {/* Quick Settings Icon */}
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => setIsSettingsOpen(true)}
             activeOpacity={0.7}
           >
-            <Text style={styles.iconButtonText}>⚙️</Text>
+            <Text style={styles.iconButtonGlyph}>⚙</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -342,122 +373,121 @@ function VoiceTextApp() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Transmission Mode Segmented Control */}
-          <View style={styles.modeSelectorCard}>
-            <TouchableOpacity
-              style={[
-                styles.modeOption,
-                !liveStreamMode && styles.modeOptionActiveDraft,
-              ]}
-              onPress={() => {
-                triggerHaptic();
-                setLiveStreamMode(false);
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.modeIcon}>📥</Text>
-              <View>
+          {/* Precision Mode Selector & Audio Telemetry Bar */}
+          <View style={styles.controlDeck}>
+            <View style={styles.modeSegment}>
+              <TouchableOpacity
+                style={[
+                  styles.modeButton,
+                  !liveStreamMode && styles.modeButtonActive,
+                ]}
+                onPress={() => {
+                  triggerHaptic();
+                  setLiveStreamMode(false);
+                }}
+                activeOpacity={0.8}
+              >
                 <Text
                   style={[
-                    styles.modeTitle,
-                    !liveStreamMode && styles.modeTitleActiveDraft,
+                    styles.modeButtonText,
+                    !liveStreamMode && styles.modeButtonTextActive,
                   ]}
                 >
-                  Draft & Send
+                  BUFFER
                 </Text>
-                <Text style={styles.modeDesc}>Dictate / paste, edit, then transmit</Text>
-              </View>
-            </TouchableOpacity>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[
-                styles.modeOption,
-                liveStreamMode && styles.modeOptionActiveLive,
-              ]}
-              onPress={() => {
-                triggerHaptic();
-                setLiveStreamMode(true);
-              }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.modeIcon}>⚡</Text>
-              <View>
-                <Text
-                  style={[
-                    styles.modeTitle,
-                    liveStreamMode && styles.modeTitleActiveLive,
-                  ]}
-                >
-                  Live Stream
-                </Text>
-                <Text style={styles.modeDesc}>Streams characters in real-time</Text>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.modeButton,
+                  liveStreamMode && styles.modeButtonActiveOrange,
+                ]}
+                onPress={() => {
+                  triggerHaptic();
+                  setLiveStreamMode(true);
+                }}
+                activeOpacity={0.8}
+              >
+                <View style={styles.streamLabelRow}>
+                  {liveStreamMode && <View style={styles.liveIndicatorDot} />}
+                  <Text
+                    style={[
+                      styles.modeButtonText,
+                      liveStreamMode && styles.modeButtonTextActiveOrange,
+                    ]}
+                  >
+                    REAL-TIME
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {/* Audio Waveform Telemetry Visualizer */}
+            <View style={styles.waveContainer}>
+              {waveBars.map((barAnim, index) => {
+                const heightInterpolated = barAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [4, 18],
+                });
+                return (
+                  <Animated.View
+                    key={index}
+                    style={[
+                      styles.waveBar,
+                      liveStreamMode && styles.waveBarOrange,
+                      { height: heightInterpolated },
+                    ]}
+                  />
+                );
+              })}
+            </View>
           </View>
 
-          {/* Voice Dictation Instruction Banner */}
-          <View style={styles.voiceTipBanner}>
-            <View style={styles.micCircle}>
-              <Text style={styles.micEmoji}>🎤</Text>
-            </View>
-            <View style={styles.voiceTipContent}>
-              <Text style={styles.voiceTipTitle}>Voice Typing Tip</Text>
-              <Text style={styles.voiceTipText}>
-                Tap the input area, then press the <Text style={styles.boldWhite}>🎙️ microphone</Text> key on your phone keyboard (Gboard/Samsung) to speak directly to your laptop!
-              </Text>
-            </View>
-          </View>
-
-          {/* Hero Input Card */}
+          {/* Minimal Dictation Surface */}
           <View
             style={[
-              styles.inputCard,
-              isFocused && styles.inputCardFocused,
-              liveStreamMode && styles.inputCardLive,
+              styles.editorSurface,
+              isFocused && styles.editorSurfaceFocused,
+              liveStreamMode && styles.editorSurfaceLive,
             ]}
           >
-            {/* Input Card Header Toolbar */}
-            <View style={styles.inputCardHeader}>
-              <View style={styles.metricsBadge}>
-                <Text style={styles.metricsText}>
-                  {charCount} chars · {wordCount} words
-                </Text>
-              </View>
-
-              <View style={styles.cardHeaderActions}>
+            <View style={styles.editorMetaBar}>
+              <Text style={styles.metaReadout}>
+                {charCount} CHARS · {wordCount} WORDS
+              </Text>
+              <View style={styles.editorActionsRow}>
                 {bufferText.length > 0 && (
                   <TouchableOpacity
-                    style={styles.cardActionBtn}
+                    style={styles.tinyActionBtn}
                     onPress={() => {
                       triggerHaptic();
                       setBufferText('');
                     }}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.cardActionBtnText}>🗑 Clear</Text>
+                    <Text style={styles.tinyActionText}>CLEAR</Text>
                   </TouchableOpacity>
                 )}
                 <TouchableOpacity
-                  style={styles.cardActionBtn}
+                  style={styles.tinyActionBtn}
                   onPress={() => setIsGuideOpen(true)}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.cardActionBtnText}>📖 ADB Setup</Text>
+                  <Text style={styles.tinyActionText}>HELP</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
-            {/* Multiline TextInput */}
             <TextInput
               ref={inputRef}
-              style={styles.mainTextInput}
+              style={styles.editorInput}
               multiline
               placeholder={
                 liveStreamMode
-                  ? '⚡ Live streaming mode active...\nType or speak; characters flow straight to your laptop.'
-                  : 'Type, paste, or speak freely here...\n\nTap the microphone on your phone keyboard to dictate effortlessly.'
+                  ? 'Real-time transmission armed.\nType or speak into your keyboard microphone to stream characters directly to your PC screen.'
+                  : 'Compose or speak here...\n\nTap the microphone on your mobile keyboard to dictate freely, then transmit.'
               }
-              placeholderTextColor="#475569"
+              placeholderTextColor="#3E424B"
               value={bufferText}
               onChangeText={handleLiveTextChange}
               onFocus={() => setIsFocused(true)}
@@ -466,127 +496,128 @@ function VoiceTextApp() {
               autoCorrect={false}
             />
 
-            {/* Bottom Actions inside Card */}
-            <View style={styles.actionButtonsRow}>
+            {/* Primary Action Buttons */}
+            <View style={styles.actionDock}>
               <TouchableOpacity
                 style={[
-                  styles.sendButton,
-                  styles.sendBufferButton,
-                  bufferText.trim().length === 0 && styles.buttonDisabled,
+                  styles.primaryTransmitBtn,
+                  bufferText.trim().length === 0 && styles.btnDisabled,
                 ]}
                 onPress={() => handleSendBuffer(bufferText, false)}
                 disabled={bufferText.trim().length === 0}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
               >
-                <Text style={styles.sendButtonText}>➤  SEND TEXT</Text>
+                <Text style={styles.primaryTransmitText}>TRANSMIT</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
-                  styles.sendButton,
-                  styles.sendEnterButton,
-                  bufferText.trim().length === 0 && styles.buttonDisabled,
+                  styles.secondaryTransmitBtn,
+                  bufferText.trim().length === 0 && styles.btnDisabled,
                 ]}
                 onPress={() => handleSendBuffer(bufferText, true)}
                 disabled={bufferText.trim().length === 0}
-                activeOpacity={0.8}
+                activeOpacity={0.85}
               >
-                <Text style={styles.sendButtonText}>↵  SEND + ENTER</Text>
+                <Text style={styles.secondaryTransmitText}>TRANSMIT + ↵</Text>
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Quick Hardware Keys Toolbar */}
-          <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>QUICK HARDWARE CONTROLS</Text>
-            <View style={styles.quickKeysGrid}>
+          {/* Tactical Hardware Keypad */}
+          <View style={styles.sectionWrap}>
+            <Text style={styles.sectionLabel}>TACTICAL CONTROLS</Text>
+            <View style={styles.tactileGrid}>
               <TouchableOpacity
-                style={[styles.quickKey, styles.keyEnter]}
+                style={[styles.tactileTile, styles.tileEnter]}
                 onPress={() => handleKeyAction('enter')}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={[styles.quickKeyText, styles.textTeal]}>↵ Enter</Text>
+                <Text style={styles.tileTextActive}>↵ ENTER</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.quickKey, styles.keyBack]}
+                style={styles.tactileTile}
                 onPress={() => handleKeyAction('backspace')}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={[styles.quickKeyText, styles.textAmber]}>⌫ Backspace</Text>
+                <Text style={styles.tileText}>⌫ BACK</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.quickKey}
+                style={styles.tactileTile}
                 onPress={() => handleKeyAction('tab')}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={styles.quickKeyText}>⇥ Tab</Text>
+                <Text style={styles.tileText}>⇥ TAB</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.quickKey}
+                style={styles.tactileTile}
                 onPress={() => handleKeyAction('space')}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={styles.quickKeyText}>␣ Space</Text>
+                <Text style={styles.tileText}>␣ SPACE</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.quickKey}
+                style={styles.tactileTile}
                 onPress={() => handleKeyAction(['ctrl', 'v'])}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={[styles.quickKeyText, styles.textSky]}>📋 Paste PC</Text>
+                <Text style={styles.tileText}>PASTE (PC)</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.quickKey}
+                style={styles.tactileTile}
                 onPress={() => handleKeyAction(['win', 'v'])}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={[styles.quickKeyText, styles.textPurple]}>📑 Win + V</Text>
+                <Text style={styles.tileText}>WIN + V</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.quickKey}
+                style={styles.tactileTile}
                 onPress={() => handleKeyAction(['ctrl', 'z'])}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={styles.quickKeyText}>↩ Undo</Text>
+                <Text style={styles.tileText}>UNDO</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.quickKey}
+                style={styles.tactileTile}
                 onPress={() => handleKeyAction('escape')}
-                activeOpacity={0.7}
+                activeOpacity={0.65}
               >
-                <Text style={styles.quickKeyText}>Esc</Text>
+                <Text style={styles.tileText}>ESC</Text>
               </TouchableOpacity>
             </View>
           </View>
 
-          {/* Quick Snippets & Presets */}
-          <View style={styles.sectionContainer}>
+          {/* Precision Presets */}
+          <View style={styles.sectionWrap}>
             <View style={styles.snippetHeaderRow}>
-              <Text style={styles.sectionTitle}>ONE-TAP SNIPPETS</Text>
-              <View style={styles.snippetTabs}>
-                {(['dev', 'phrases', 'symbols'] as const).map((cat) => (
+              <Text style={styles.sectionLabel}>SNIPPETS</Text>
+              <View style={styles.tabSelector}>
+                {(['terminal', 'text', 'code'] as const).map((tab) => (
                   <TouchableOpacity
-                    key={cat}
+                    key={tab}
                     style={[
-                      styles.snippetTab,
-                      activeSnippetCategory === cat && styles.snippetTabActive,
+                      styles.tabItem,
+                      activeSnippetTab === tab && styles.tabItemActive,
                     ]}
-                    onPress={() => setActiveSnippetCategory(cat)}
+                    onPress={() => {
+                      triggerHaptic();
+                      setActiveSnippetTab(tab);
+                    }}
                   >
                     <Text
                       style={[
-                        styles.snippetTabText,
-                        activeSnippetCategory === cat && styles.snippetTabTextActive,
+                        styles.tabItemText,
+                        activeSnippetTab === tab && styles.tabItemTextActive,
                       ]}
                     >
-                      {cat.toUpperCase()}
+                      {tab.toUpperCase()}
                     </Text>
                   </TouchableOpacity>
                 ))}
@@ -596,12 +627,12 @@ function VoiceTextApp() {
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipsScroll}
+              contentContainerStyle={styles.chipsRow}
             >
-              {snippetCategories[activeSnippetCategory].map((snippet) => (
+              {snippets[activeSnippetTab].map((snippet) => (
                 <TouchableOpacity
                   key={snippet}
-                  style={styles.chipButton}
+                  style={styles.chipTile}
                   onPress={() => {
                     triggerHaptic();
                     handleSendBuffer(snippet, true);
@@ -612,43 +643,42 @@ function VoiceTextApp() {
                   }}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.chipButtonText}>{snippet}</Text>
-                  <Text style={styles.chipArrow}>↵</Text>
+                  <Text style={styles.chipTileText}>{snippet}</Text>
+                  <Text style={styles.chipTileArrow}>↵</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            <Text style={styles.chipHint}>Tap to send + enter instantly · Long-press to insert into box</Text>
           </View>
 
-          {/* Recent Transmission History */}
+          {/* Transmission Log / Recent */}
           {sentHistory.length > 0 && (
-            <View style={styles.sectionContainer}>
-              <View style={styles.historyHeader}>
-                <Text style={styles.sectionTitle}>RECENT TRANSMISSIONS</Text>
+            <View style={styles.sectionWrap}>
+              <View style={styles.snippetHeaderRow}>
+                <Text style={styles.sectionLabel}>TRANSMISSION LOG</Text>
                 <TouchableOpacity
                   onPress={() => setSentHistory([])}
                   activeOpacity={0.7}
                 >
-                  <Text style={styles.historyClear}>Clear</Text>
+                  <Text style={styles.clearHistoryText}>CLEAR</Text>
                 </TouchableOpacity>
               </View>
 
-              {sentHistory.slice(0, 5).map((item) => (
-                <View key={item.id} style={styles.historyItem}>
-                  <View style={styles.historyTextCol}>
-                    <Text style={styles.historySnippet} numberOfLines={2}>
+              {sentHistory.slice(0, 4).map((item) => (
+                <View key={item.id} style={styles.historyCard}>
+                  <View style={styles.historyContent}>
+                    <Text style={styles.historyText} numberOfLines={2}>
                       {item.text}
                     </Text>
-                    <Text style={styles.historyMeta}>
-                      {item.timestamp} {item.withEnter ? '· with Enter ↵' : ''}
+                    <Text style={styles.historyMetaText}>
+                      {item.timestamp} {item.withEnter ? '· ENTER' : ''}
                     </Text>
                   </View>
                   <TouchableOpacity
-                    style={styles.resendBtn}
+                    style={styles.repeatBtn}
                     onPress={() => handleSendBuffer(item.text, item.withEnter)}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.resendBtnText}>Re-send</Text>
+                    <Text style={styles.repeatBtnText}>RESEND</Text>
                   </TouchableOpacity>
                 </View>
               ))}
@@ -660,115 +690,115 @@ function VoiceTextApp() {
       </KeyboardAvoidingView>
 
       {/* Settings Modal */}
-      <Modal visible={isSettingsOpen} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>Connection Settings</Text>
-              <TouchableOpacity onPress={() => setIsSettingsOpen(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
+      <Modal visible={isSettingsOpen} transparent animationType="fade">
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalBox}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalHeading}>CONFIGURATION</Text>
+              <TouchableOpacity
+                onPress={() => setIsSettingsOpen(false)}
+                style={styles.modalCloseBtn}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.inputLabel}>Host / IP Address:</Text>
+            <Text style={styles.fieldLabel}>HOST ADDRESS</Text>
             <TextInput
-              style={styles.modalInput}
+              style={styles.fieldInput}
               value={host}
               onChangeText={setHost}
-              placeholder="127.0.0.1 or LAN IP"
-              placeholderTextColor="#64748b"
+              placeholder="127.0.0.1"
+              placeholderTextColor="#475569"
               autoCapitalize="none"
               autoCorrect={false}
             />
 
-            <Text style={styles.inputLabel}>Port:</Text>
+            <Text style={styles.fieldLabel}>PORT</Text>
             <TextInput
-              style={styles.modalInput}
+              style={styles.fieldInput}
               value={port}
               onChangeText={setPort}
               keyboardType="numeric"
               placeholder="8080"
-              placeholderTextColor="#64748b"
+              placeholderTextColor="#475569"
             />
 
             <TouchableOpacity
-              style={styles.toggleRow}
+              style={styles.switchRow}
               onPress={() => setHapticEnabled(!hapticEnabled)}
               activeOpacity={0.7}
             >
               <View>
-                <Text style={styles.toggleLabel}>Vibration Feedback</Text>
-                <Text style={styles.toggleSub}>Haptic tick on typing & buttons</Text>
+                <Text style={styles.switchLabel}>TACTILE HAPTICS</Text>
+                <Text style={styles.switchSub}>Micro-vibrations on keystroke actuation</Text>
               </View>
-              <View style={[styles.switchTrack, hapticEnabled && styles.switchTrackActive]}>
-                <View style={[styles.switchThumb, hapticEnabled && styles.switchThumbActive]} />
+              <View style={[styles.switchPill, hapticEnabled && styles.switchPillActive]}>
+                <View style={[styles.switchDot, hapticEnabled && styles.switchDotActive]} />
               </View>
             </TouchableOpacity>
 
-            <View style={styles.modalButtons}>
+            <View style={styles.modalFooterRow}>
               <TouchableOpacity
-                style={[styles.modalActionBtn, styles.modalSaveBtn]}
+                style={styles.modalSaveButton}
                 onPress={() => {
                   setIsSettingsOpen(false);
                   connectToServer();
                 }}
               >
-                <Text style={styles.modalActionBtnText}>Save & Connect</Text>
+                <Text style={styles.modalSaveButtonText}>APPLY & CONNECT</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.modalActionBtn, styles.modalCloseBtn]}
+                style={styles.modalCancelButton}
                 onPress={() => setIsSettingsOpen(false)}
               >
-                <Text style={styles.modalCloseBtnText}>Close</Text>
+                <Text style={styles.modalCancelButtonText}>CLOSE</Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* ADB Guide Modal */}
+      {/* Guide Modal */}
       <Modal visible={isGuideOpen} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>ADB Connection Guide</Text>
-              <TouchableOpacity onPress={() => setIsGuideOpen(false)}>
-                <Text style={styles.modalCloseIcon}>✕</Text>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalBox}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalHeading}>SETUP // USB ADB</Text>
+              <TouchableOpacity
+                onPress={() => setIsGuideOpen(false)}
+                style={styles.modalCloseBtn}
+              >
+                <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.guideScroll}>
-              <Text style={styles.guideStep}>1. Plug USB Cable into Laptop</Text>
-              <Text style={styles.guideDesc}>
-                Connect phone to your PC. Ensure "USB Debugging" is enabled in phone Developer Options.
+            <ScrollView style={styles.modalScroll}>
+              <Text style={styles.guideStepNum}>01 // PHYSICAL LINK</Text>
+              <Text style={styles.guideBody}>
+                Connect device via USB. Verify USB Debugging is authorized in Developer Options.
               </Text>
 
-              <Text style={styles.guideStep}>2. Start Desktop Companion</Text>
-              <Text style={styles.guideDesc}>
-                On your PC, double-click:
+              <Text style={styles.guideStepNum}>02 // HOST COMPANION</Text>
+              <Text style={styles.guideBody}>
+                Launch Desktop Companion on your Windows PC:
               </Text>
-              <View style={styles.codeSnippet}>
-                <Text style={styles.codeText}>ADBKeyboardCompanion.exe</Text>
-              </View>
-              <Text style={styles.guideDesc}>
-                Or run batch script:
-              </Text>
-              <View style={styles.codeSnippet}>
-                <Text style={styles.codeText}>start-companion.bat</Text>
+              <View style={styles.terminalBox}>
+                <Text style={styles.terminalText}>ADBKeyboardCompanion.exe</Text>
               </View>
 
-              <Text style={styles.guideStep}>3. Instant USB Tunneling</Text>
-              <Text style={styles.guideDesc}>
-                Traffic is routed through <Text style={styles.boldWhite}>localhost:8080</Text> via ADB reverse. Zero Wi-Fi needed, ultra-fast 5ms latency!
+              <Text style={styles.guideStepNum}>03 // DIRECT PORT TUNNEL</Text>
+              <Text style={styles.guideBody}>
+                Communication operates through localhost:8080 via ADB reverse. Zero cloud dependency, ultra-low 5ms latency.
               </Text>
             </ScrollView>
 
             <TouchableOpacity
-              style={[styles.modalActionBtn, styles.modalSaveBtn, styles.modalBtnMargin]}
+              style={styles.modalSaveButton}
               onPress={() => setIsGuideOpen(false)}
             >
-              <Text style={styles.modalActionBtnText}>Got it!</Text>
+              <Text style={styles.modalSaveButtonText}>DISMISS</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -780,7 +810,7 @@ function VoiceTextApp() {
 const styles = StyleSheet.create({
   safeContainer: {
     flex: 1,
-    backgroundColor: '#070b14',
+    backgroundColor: '#08090A',
   },
   flexOne: {
     flex: 1,
@@ -789,496 +819,488 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1e293b',
-    backgroundColor: '#0f172a',
+    borderBottomColor: 'rgba(255, 255, 255, 0.07)',
+    backgroundColor: '#0C0D0E',
   },
-  brandRow: {
+  headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-  },
-  brandIconWrapper: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#1e293b',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#38bdf8',
-  },
-  brandIcon: {
-    fontSize: 18,
+    gap: 6,
   },
   brandTitle: {
-    color: '#f8fafc',
+    color: '#F7F8F8',
     fontSize: 15,
     fontWeight: '800',
-    letterSpacing: 0.8,
+    letterSpacing: 1.5,
+  },
+  brandDivider: {
+    color: '#3E424B',
+    fontSize: 14,
+    fontWeight: '400',
   },
   brandSubtitle: {
-    color: '#64748b',
+    color: '#8A8F98',
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
+    letterSpacing: 1.2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   headerRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 20,
+    borderRadius: 4,
     borderWidth: 1,
   },
   statusPillOnline: {
-    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-    borderColor: 'rgba(16, 185, 129, 0.4)',
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   statusPillConnecting: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderColor: 'rgba(245, 158, 11, 0.4)',
+    backgroundColor: 'rgba(245, 158, 11, 0.08)',
+    borderColor: 'rgba(245, 158, 11, 0.3)',
   },
   statusPillOffline: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    borderColor: 'rgba(239, 68, 68, 0.4)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   statusDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     marginRight: 6,
   },
   dotOnline: {
-    backgroundColor: '#10b981',
+    backgroundColor: '#10B981',
   },
   dotConnecting: {
-    backgroundColor: '#f59e0b',
+    backgroundColor: '#F59E0B',
   },
   dotOffline: {
-    backgroundColor: '#ef4444',
+    backgroundColor: '#EF4444',
   },
   statusText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
-    letterSpacing: 0.4,
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   textOnline: {
-    color: '#10b981',
+    color: '#10B981',
   },
   textConnecting: {
-    color: '#f59e0b',
+    color: '#F59E0B',
   },
   textOffline: {
-    color: '#ef4444',
+    color: '#EF4444',
   },
   iconButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    backgroundColor: '#1e293b',
+    width: 32,
+    height: 32,
+    borderRadius: 4,
+    backgroundColor: '#141517',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  iconButtonText: {
+  iconButtonGlyph: {
+    color: '#8A8F98',
     fontSize: 14,
   },
   scrollContent: {
     padding: 16,
     paddingBottom: 40,
   },
-  modeSelectorCard: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 14,
-  },
-  modeOption: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: '#0f172a',
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#1e293b',
-  },
-  modeOptionActiveDraft: {
-    backgroundColor: 'rgba(2, 132, 199, 0.15)',
-    borderColor: '#38bdf8',
-  },
-  modeOptionActiveLive: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
-    borderColor: '#f59e0b',
-  },
-  modeIcon: {
-    fontSize: 20,
-  },
-  modeTitle: {
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  modeTitleActiveDraft: {
-    color: '#38bdf8',
-  },
-  modeTitleActiveLive: {
-    color: '#f59e0b',
-  },
-  modeDesc: {
-    color: '#64748b',
-    fontSize: 10,
-    marginTop: 2,
-  },
-  voiceTipBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'rgba(15, 23, 42, 0.8)',
-    padding: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#1e293b',
-    marginBottom: 14,
-  },
-  micCircle: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(56, 189, 248, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#0284c7',
-  },
-  micEmoji: {
-    fontSize: 18,
-  },
-  voiceTipContent: {
-    flex: 1,
-  },
-  voiceTipTitle: {
-    color: '#38bdf8',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  voiceTipText: {
-    color: '#94a3b8',
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 2,
-  },
-  boldWhite: {
-    color: '#f8fafc',
-    fontWeight: '700',
-  },
-  inputCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: '#1e293b',
-    padding: 14,
-    marginBottom: 16,
-    elevation: 3,
-  },
-  inputCardFocused: {
-    borderColor: '#38bdf8',
-    shadowColor: '#38bdf8',
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-  },
-  inputCardLive: {
-    borderColor: '#f59e0b',
-  },
-  inputCardHeader: {
+  controlDeck: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
-  },
-  metricsBadge: {
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  metricsText: {
-    color: '#64748b',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  cardHeaderActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  cardActionBtn: {
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    backgroundColor: '#111214',
+    padding: 6,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    marginBottom: 12,
   },
-  cardActionBtnText: {
-    color: '#94a3b8',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  mainTextInput: {
-    color: '#f8fafc',
-    fontSize: 16,
-    lineHeight: 24,
-    minHeight: 150,
-    maxHeight: 280,
-    textAlignVertical: 'top',
-    padding: 8,
-  },
-  actionButtonsRow: {
+  modeSegment: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#1e293b',
+    gap: 4,
   },
-  sendButton: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 10,
+  modeButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 4,
+    backgroundColor: 'transparent',
+  },
+  modeButtonActive: {
+    backgroundColor: '#202226',
+  },
+  modeButtonActiveOrange: {
+    backgroundColor: 'rgba(255, 85, 0, 0.14)',
+  },
+  modeButtonText: {
+    color: '#626773',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  modeButtonTextActive: {
+    color: '#F7F8F8',
+  },
+  modeButtonTextActiveOrange: {
+    color: '#FF5500',
+  },
+  streamLabelRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 2,
+    gap: 6,
   },
-  sendBufferButton: {
-    backgroundColor: '#0284c7',
+  liveIndicatorDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FF5500',
   },
-  sendEnterButton: {
-    backgroundColor: '#059669',
+  waveContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 12,
+    height: 24,
   },
-  buttonDisabled: {
-    opacity: 0.4,
+  waveBar: {
+    width: 2,
+    backgroundColor: '#4E535E',
+    borderRadius: 1,
   },
-  sendButtonText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0.6,
+  waveBarOrange: {
+    backgroundColor: '#FF5500',
   },
-  sectionContainer: {
+  editorSurface: {
+    backgroundColor: '#101113',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 14,
     marginBottom: 16,
   },
-  sectionTitle: {
-    color: '#64748b',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1,
+  editorSurfaceFocused: {
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+  },
+  editorSurfaceLive: {
+    borderColor: 'rgba(255, 85, 0, 0.4)',
+  },
+  editorMetaBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
     marginBottom: 10,
   },
-  quickKeysGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  metaReadout: {
+    color: '#555962',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  quickKey: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#0f172a',
+  editorActionsRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  tinyActionBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 3,
+    backgroundColor: '#18191B',
     borderWidth: 1,
-    borderColor: '#1e293b',
-    minWidth: 70,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  tinyActionText: {
+    color: '#8A8F98',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  editorInput: {
+    color: '#F7F8F8',
+    fontSize: 16,
+    lineHeight: 24,
+    minHeight: 160,
+    maxHeight: 280,
+    textAlignVertical: 'top',
+    padding: 0,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif',
+  },
+  actionDock: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  primaryTransmitBtn: {
+    flex: 1.2,
+    backgroundColor: '#F7F8F8',
+    paddingVertical: 14,
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  keyEnter: {
-    borderColor: '#059669',
+  primaryTransmitText: {
+    color: '#08090A',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  keyBack: {
-    borderColor: '#b45309',
+  secondaryTransmitBtn: {
+    flex: 1,
+    backgroundColor: '#1A1C1E',
+    paddingVertical: 14,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  quickKeyText: {
-    color: '#e2e8f0',
+  secondaryTransmitText: {
+    color: '#F7F8F8',
     fontSize: 12,
     fontWeight: '700',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  textTeal: {
-    color: '#34d399',
+  btnDisabled: {
+    opacity: 0.25,
   },
-  textAmber: {
-    color: '#fbbf24',
+  sectionWrap: {
+    marginBottom: 16,
   },
-  textSky: {
-    color: '#38bdf8',
+  sectionLabel: {
+    color: '#555962',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    marginBottom: 8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  textPurple: {
-    color: '#c084fc',
+  tactileGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  tactileTile: {
+    flexBasis: '23%',
+    flexGrow: 1,
+    backgroundColor: '#121315',
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tileEnter: {
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  tileText: {
+    color: '#8A8F98',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  tileTextActive: {
+    color: '#F7F8F8',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   snippetHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  snippetTabs: {
+  tabSelector: {
     flexDirection: 'row',
-    backgroundColor: '#0f172a',
-    borderRadius: 8,
+    backgroundColor: '#121315',
+    borderRadius: 4,
     padding: 2,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: 'rgba(255, 255, 255, 0.05)',
   },
-  snippetTab: {
+  tabItem: {
     paddingHorizontal: 8,
     paddingVertical: 3,
-    borderRadius: 6,
+    borderRadius: 3,
   },
-  snippetTabActive: {
-    backgroundColor: '#1e293b',
+  tabItemActive: {
+    backgroundColor: '#202226',
   },
-  snippetTabText: {
-    color: '#64748b',
-    fontSize: 10,
+  tabItemText: {
+    color: '#555962',
+    fontSize: 9,
     fontWeight: '700',
+    letterSpacing: 0.6,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  snippetTabTextActive: {
-    color: '#38bdf8',
+  tabItemTextActive: {
+    color: '#F7F8F8',
   },
-  chipsScroll: {
-    gap: 8,
+  chipsRow: {
+    gap: 6,
     paddingBottom: 4,
   },
-  chipButton: {
+  chipTile: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#0f172a',
-    paddingHorizontal: 12,
+    backgroundColor: '#121315',
+    paddingHorizontal: 11,
     paddingVertical: 8,
-    borderRadius: 20,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  chipButtonText: {
-    color: '#38bdf8',
-    fontSize: 12,
+  chipTileText: {
+    color: '#C6CAD0',
+    fontSize: 11,
     fontWeight: '600',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  chipArrow: {
-    color: '#64748b',
-    fontSize: 11,
+  chipTileArrow: {
+    color: '#555962',
+    fontSize: 10,
     fontWeight: '700',
   },
-  chipHint: {
-    color: '#475569',
+  clearHistoryText: {
+    color: '#555962',
     fontSize: 10,
-    marginTop: 6,
-    fontStyle: 'italic',
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  historyHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  historyClear: {
-    color: '#64748b',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  historyItem: {
+  historyCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0f172a',
+    backgroundColor: '#111214',
     padding: 10,
-    borderRadius: 10,
+    borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: 'rgba(255, 255, 255, 0.05)',
     marginBottom: 6,
   },
-  historyTextCol: {
+  historyContent: {
     flex: 1,
-    marginRight: 10,
+    marginRight: 12,
   },
-  historySnippet: {
-    color: '#e2e8f0',
+  historyText: {
+    color: '#D4D7DC',
     fontSize: 12,
-    fontWeight: '500',
+    lineHeight: 17,
   },
-  historyMeta: {
-    color: '#64748b',
-    fontSize: 10,
+  historyMetaText: {
+    color: '#555962',
+    fontSize: 9,
     marginTop: 3,
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  resendBtn: {
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
+  repeatBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 3,
+    backgroundColor: '#1A1C1E',
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  resendBtnText: {
-    color: '#38bdf8',
-    fontSize: 11,
+  repeatBtnText: {
+    color: '#8A8F98',
+    fontSize: 10,
     fontWeight: '700',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   bottomSpacer: {
     height: 30,
   },
-  modalOverlay: {
+  modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.82)',
     justifyContent: 'center',
-    padding: 20,
+    padding: 24,
   },
-  modalCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 16,
+  modalBox: {
+    backgroundColor: '#101113',
+    borderRadius: 8,
     padding: 20,
     borderWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  modalHeaderRow: {
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
   },
-  modalTitle: {
-    color: '#38bdf8',
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  modalCloseIcon: {
-    color: '#64748b',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  inputLabel: {
-    color: '#94a3b8',
+  modalHeading: {
+    color: '#F7F8F8',
     fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  modalCloseBtn: {
+    padding: 4,
+  },
+  modalCloseText: {
+    color: '#626773',
+    fontSize: 14,
+  },
+  fieldLabel: {
+    color: '#626773',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
     marginBottom: 6,
     marginTop: 8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  modalInput: {
-    backgroundColor: '#1e293b',
-    color: '#ffffff',
-    borderRadius: 8,
-    padding: 10,
+  fieldInput: {
+    backgroundColor: '#16171A',
+    color: '#F7F8F8',
+    borderRadius: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  toggleRow: {
+  switchRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -1286,93 +1308,105 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderTopWidth: 1,
     borderBottomWidth: 1,
-    borderColor: '#1e293b',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  toggleLabel: {
-    color: '#e2e8f0',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  toggleSub: {
-    color: '#64748b',
+  switchLabel: {
+    color: '#F7F8F8',
     fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  switchSub: {
+    color: '#555962',
+    fontSize: 10,
     marginTop: 2,
   },
-  switchTrack: {
-    width: 44,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#334155',
-    padding: 2,
-  },
-  switchTrackActive: {
-    backgroundColor: '#0284c7',
-  },
-  switchThumb: {
-    width: 20,
+  switchPill: {
+    width: 38,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#202226',
+    padding: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  switchThumbActive: {
+  switchPillActive: {
+    backgroundColor: '#F7F8F8',
+  },
+  switchDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#555962',
+  },
+  switchDotActive: {
     alignSelf: 'flex-end',
+    backgroundColor: '#08090A',
   },
-  modalButtons: {
+  modalFooterRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 10,
+    gap: 8,
+    marginTop: 12,
   },
-  modalActionBtn: {
+  modalSaveButton: {
     flex: 1,
+    backgroundColor: '#F7F8F8',
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 4,
     alignItems: 'center',
   },
-  modalSaveBtn: {
-    backgroundColor: '#0284c7',
+  modalSaveButtonText: {
+    color: '#08090A',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  modalCloseBtn: {
-    backgroundColor: '#1e293b',
+  modalCancelButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 4,
+    backgroundColor: '#16171A',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
   },
-  modalActionBtnText: {
-    color: '#ffffff',
-    fontSize: 13,
+  modalCancelButtonText: {
+    color: '#8A8F98',
+    fontSize: 11,
     fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  modalCloseBtnText: {
-    color: '#94a3b8',
-    fontSize: 13,
-    fontWeight: '600',
+  modalScroll: {
+    maxHeight: 280,
+    marginBottom: 16,
   },
-  modalBtnMargin: {
-    marginTop: 16,
-  },
-  guideScroll: {
-    maxHeight: 320,
-  },
-  guideStep: {
-    color: '#f8fafc',
-    fontSize: 13,
-    fontWeight: '700',
+  guideStepNum: {
+    color: '#FF5500',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.2,
     marginTop: 12,
     marginBottom: 4,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  guideDesc: {
-    color: '#94a3b8',
+  guideBody: {
+    color: '#8A8F98',
     fontSize: 12,
     lineHeight: 18,
   },
-  codeSnippet: {
-    backgroundColor: '#020617',
+  terminalBox: {
+    backgroundColor: '#08090A',
     padding: 8,
-    borderRadius: 6,
+    borderRadius: 4,
     marginVertical: 6,
-    borderLeftWidth: 3,
-    borderLeftColor: '#38bdf8',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
   },
-  codeText: {
-    color: '#38bdf8',
+  terminalText: {
+    color: '#F7F8F8',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 12,
+    fontSize: 11,
   },
 });
