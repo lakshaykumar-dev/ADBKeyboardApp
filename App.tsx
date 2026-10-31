@@ -484,8 +484,8 @@ function VoiceTextApp() {
               multiline
               placeholder={
                 liveStreamMode
-                  ? 'Real-time transmission armed.\nType or speak into your keyboard microphone to stream characters directly to your PC screen.'
-                  : 'Compose or speak here...\n\nTap the microphone on your mobile keyboard to dictate freely, then transmit.'
+                  ? 'Real-time typing active.\nSpeak or type; characters will appear directly on your PC screen.'
+                  : 'Type or dictate here...\n\nTap the microphone on your keyboard to speak freely, then tap Send to PC.'
               }
               placeholderTextColor="#3E424B"
               value={bufferText}
@@ -507,7 +507,7 @@ function VoiceTextApp() {
                 disabled={bufferText.trim().length === 0}
                 activeOpacity={0.85}
               >
-                <Text style={styles.primaryTransmitText}>TRANSMIT</Text>
+                <Text style={styles.primaryTransmitText}>SEND TO PC</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -519,7 +519,7 @@ function VoiceTextApp() {
                 disabled={bufferText.trim().length === 0}
                 activeOpacity={0.85}
               >
-                <Text style={styles.secondaryTransmitText}>TRANSMIT + ↵</Text>
+                <Text style={styles.secondaryTransmitText}>SEND + ENTER ↵</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -650,11 +650,11 @@ function VoiceTextApp() {
             </ScrollView>
           </View>
 
-          {/* Transmission Log / Recent */}
+          {/* Recent Sent Log */}
           {sentHistory.length > 0 && (
             <View style={styles.sectionWrap}>
               <View style={styles.snippetHeaderRow}>
-                <Text style={styles.sectionLabel}>TRANSMISSION LOG</Text>
+                <Text style={styles.sectionLabel}>RECENT SENT</Text>
                 <TouchableOpacity
                   onPress={() => setSentHistory([])}
                   activeOpacity={0.7}
