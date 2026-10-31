@@ -28,6 +28,56 @@ interface SentItem {
   withEnter: boolean;
 }
 
+interface KeyShortcutDef {
+  id: string;
+  label: string;
+  sub?: string;
+  action: string | string[];
+  highlight?: boolean;
+  variant?: 'danger' | 'accent';
+}
+
+const TACTICAL_KEYS: KeyShortcutDef[] = [
+  { id: 'enter', label: '↵ ENTER', action: 'enter', highlight: true },
+  { id: 'backspace', label: '⌫ BACK', action: 'backspace' },
+  { id: 'tab', label: '⇥ TAB', action: 'tab' },
+  { id: 'space', label: '␣ SPACE', action: 'space' },
+  { id: 'esc', label: 'ESC', action: 'escape' },
+  { id: 'del', label: 'DEL', action: 'delete' },
+  { id: 'shift_del', label: '⇧+DEL', sub: 'PERM DEL', action: ['shift', 'delete'], variant: 'danger' },
+  { id: 'alt_tab', label: 'ALT+TAB', action: ['alt', 'tab'] },
+];
+
+const CONTROL_SHORTCUTS: KeyShortcutDef[] = [
+  { id: 'ctrl_c', label: 'CTRL+C', sub: 'COPY', action: ['ctrl', 'c'], highlight: true },
+  { id: 'ctrl_v', label: 'CTRL+V', sub: 'PASTE', action: ['ctrl', 'v'], highlight: true },
+  { id: 'ctrl_x', label: 'CTRL+X', sub: 'CUT', action: ['ctrl', 'x'] },
+  { id: 'ctrl_z', label: 'CTRL+Z', sub: 'UNDO', action: ['ctrl', 'z'] },
+  { id: 'ctrl_a', label: 'CTRL+A', sub: 'ALL', action: ['ctrl', 'a'] },
+  { id: 'ctrl_s', label: 'CTRL+S', sub: 'SAVE', action: ['ctrl', 's'] },
+  { id: 'ctrl_f', label: 'CTRL+F', sub: 'FIND', action: ['ctrl', 'f'] },
+  { id: 'win_v', label: 'WIN+V', sub: 'CLIP', action: ['win', 'v'] },
+  { id: 'win_d', label: 'WIN+D', sub: 'DESK', action: ['win', 'd'] },
+  { id: 'ctrl_w', label: 'CTRL+W', sub: 'CLOSE', action: ['ctrl', 'w'] },
+  { id: 'ctrl_y', label: 'CTRL+Y', sub: 'REDO', action: ['ctrl', 'y'] },
+  { id: 'alt_f4', label: 'ALT+F4', sub: 'QUIT', action: ['alt', 'f4'] },
+];
+
+const FUNCTION_KEYS: KeyShortcutDef[] = [
+  { id: 'f1', label: 'F1', sub: 'HELP', action: 'f1' },
+  { id: 'f2', label: 'F2', sub: 'RENAME', action: 'f2', highlight: true },
+  { id: 'f3', label: 'F3', sub: 'FIND', action: 'f3' },
+  { id: 'f4', label: 'F4', sub: 'CLOSE', action: 'f4' },
+  { id: 'f5', label: 'F5', sub: 'REFRESH', action: 'f5', highlight: true },
+  { id: 'f6', label: 'F6', sub: 'ADDR', action: 'f6' },
+  { id: 'f7', label: 'F7', sub: 'CARET', action: 'f7' },
+  { id: 'f8', label: 'F8', sub: 'BOOT', action: 'f8' },
+  { id: 'f9', label: 'F9', sub: 'BUILD', action: 'f9' },
+  { id: 'f10', label: 'F10', sub: 'MENU', action: 'f10' },
+  { id: 'f11', label: 'F11', sub: 'FULL', action: 'f11' },
+  { id: 'f12', label: 'F12', sub: 'DEV', action: 'f12' },
+];
+
 export default function App() {
   return (
     <SafeAreaProvider>
@@ -51,7 +101,6 @@ function VoiceTextApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [sentHistory, setSentHistory] = useState<SentItem[]>([]);
-  const [activeSnippetTab, setActiveSnippetTab] = useState<'terminal' | 'text' | 'code'>('terminal');
 
   // Animation values
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -65,7 +114,7 @@ function VoiceTextApp() {
     new Animated.Value(0.6),
   ]).current;
 
-  const inputRef = useRef<TextInput>(null);
+  const inputRef = useRef<any>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const pingIntervalRef = useRef<any>(null);
   const reconnectTimeoutRef = useRef<any>(null);
@@ -294,11 +343,6 @@ function VoiceTextApp() {
   const charCount = bufferText.length;
   const wordCount = bufferText.trim() === '' ? 0 : bufferText.trim().split(/\s+/).length;
 
-  const snippets = {
-    terminal: ['git status', 'git pull', 'git push', 'npm run dev', 'cls', 'python app.py', 'docker ps'],
-    text: ['Thank you.', 'Confirmed.', 'Looking into this now.', 'Please review.', 'LGTM.'],
-    code: ['const ', 'return ', 'console.log(', '() => ', '===', '!==', 'async/await'],
-  };
 
   return (
     <SafeAreaView style={styles.safeContainer} edges={['top', 'left', 'right', 'bottom']}>
@@ -526,134 +570,123 @@ function VoiceTextApp() {
 
           {/* Tactical Hardware Keypad */}
           <View style={styles.sectionWrap}>
-            <Text style={styles.sectionLabel}>TACTICAL CONTROLS</Text>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionLabel}>TACTICAL KEYS</Text>
+              <Text style={styles.sectionBadge}>EDIT & NAV</Text>
+            </View>
             <View style={styles.tactileGrid}>
-              <TouchableOpacity
-                style={[styles.tactileTile, styles.tileEnter]}
-                onPress={() => handleKeyAction('enter')}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileTextActive}>↵ ENTER</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.tactileTile}
-                onPress={() => handleKeyAction('backspace')}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileText}>⌫ BACK</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.tactileTile}
-                onPress={() => handleKeyAction('tab')}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileText}>⇥ TAB</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.tactileTile}
-                onPress={() => handleKeyAction('space')}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileText}>␣ SPACE</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.tactileTile}
-                onPress={() => handleKeyAction(['ctrl', 'v'])}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileText}>PASTE (PC)</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.tactileTile}
-                onPress={() => handleKeyAction(['win', 'v'])}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileText}>WIN + V</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.tactileTile}
-                onPress={() => handleKeyAction(['ctrl', 'z'])}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileText}>UNDO</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.tactileTile}
-                onPress={() => handleKeyAction('escape')}
-                activeOpacity={0.65}
-              >
-                <Text style={styles.tileText}>ESC</Text>
-              </TouchableOpacity>
+              {TACTICAL_KEYS.map((k) => (
+                <TouchableOpacity
+                  key={k.id}
+                  style={[
+                    styles.tactileTile,
+                    k.variant === 'danger'
+                      ? styles.tileDanger
+                      : k.highlight && styles.tileEnter,
+                  ]}
+                  onPress={() => handleKeyAction(k.action)}
+                  activeOpacity={0.65}
+                >
+                  <Text
+                    style={
+                      k.variant === 'danger'
+                        ? styles.tileTextDanger
+                        : k.highlight
+                        ? styles.tileTextActive
+                        : styles.tileText
+                    }
+                  >
+                    {k.label}
+                  </Text>
+                  {k.sub && (
+                    <Text
+                      style={[
+                        styles.tileSubText,
+                        k.variant === 'danger' && styles.tileSubTextDanger,
+                      ]}
+                    >
+                      {k.sub}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
-          {/* Precision Presets */}
+          {/* Control Key Combinations */}
           <View style={styles.sectionWrap}>
-            <View style={styles.snippetHeaderRow}>
-              <Text style={styles.sectionLabel}>SNIPPETS</Text>
-              <View style={styles.tabSelector}>
-                {(['terminal', 'text', 'code'] as const).map((tab) => (
-                  <TouchableOpacity
-                    key={tab}
-                    style={[
-                      styles.tabItem,
-                      activeSnippetTab === tab && styles.tabItemActive,
-                    ]}
-                    onPress={() => {
-                      triggerHaptic();
-                      setActiveSnippetTab(tab);
-                    }}
-                  >
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionLabel}>CONTROL COMBINATIONS</Text>
+              <Text style={styles.sectionBadge}>SHORTCUTS</Text>
+            </View>
+            <View style={styles.tactileGrid}>
+              {CONTROL_SHORTCUTS.map((k) => (
+                <TouchableOpacity
+                  key={k.id}
+                  style={[
+                    styles.tactileTile,
+                    k.highlight && styles.tileHighlight,
+                  ]}
+                  onPress={() => handleKeyAction(k.action)}
+                  activeOpacity={0.65}
+                >
+                  <Text style={k.highlight ? styles.tileTextHighlight : styles.tileText}>
+                    {k.label}
+                  </Text>
+                  {k.sub && (
                     <Text
                       style={[
-                        styles.tabItemText,
-                        activeSnippetTab === tab && styles.tabItemTextActive,
+                        styles.tileSubText,
+                        k.highlight && styles.tileSubTextHighlight,
                       ]}
                     >
-                      {tab.toUpperCase()}
+                      {k.sub}
                     </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipsRow}
-            >
-              {snippets[activeSnippetTab].map((snippet) => (
-                <TouchableOpacity
-                  key={snippet}
-                  style={styles.chipTile}
-                  onPress={() => {
-                    triggerHaptic();
-                    handleSendBuffer(snippet, true);
-                  }}
-                  onLongPress={() => {
-                    triggerHaptic();
-                    setBufferText((prev) => (prev ? prev + ' ' + snippet : snippet));
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.chipTileText}>{snippet}</Text>
-                  <Text style={styles.chipTileArrow}>↵</Text>
+                  )}
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
+          </View>
+
+          {/* Function Keys Deck (F1 - F12) */}
+          <View style={styles.sectionWrap}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionLabel}>FUNCTION KEYS</Text>
+              <Text style={styles.sectionBadge}>F1 – F12</Text>
+            </View>
+            <View style={styles.fKeyGrid}>
+              {FUNCTION_KEYS.map((k) => (
+                <TouchableOpacity
+                  key={k.id}
+                  style={[
+                    styles.fKeyTile,
+                    k.highlight && styles.fKeyHighlight,
+                  ]}
+                  onPress={() => handleKeyAction(k.action)}
+                  activeOpacity={0.65}
+                >
+                  <Text style={k.highlight ? styles.fKeyTextHighlight : styles.fKeyText}>
+                    {k.label}
+                  </Text>
+                  {k.sub && (
+                    <Text
+                      style={[
+                        styles.fKeySubText,
+                        k.highlight && styles.fKeySubHighlight,
+                      ]}
+                    >
+                      {k.sub}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
 
           {/* Recent Sent Log */}
           {sentHistory.length > 0 && (
             <View style={styles.sectionWrap}>
-              <View style={styles.snippetHeaderRow}>
+              <View style={styles.sectionHeaderRow}>
                 <Text style={styles.sectionLabel}>RECENT SENT</Text>
                 <TouchableOpacity
                   onPress={() => setSentHistory([])}
@@ -1134,63 +1167,100 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  snippetHeaderRow: {
+  sectionHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
-  tabSelector: {
-    flexDirection: 'row',
-    backgroundColor: '#121315',
-    borderRadius: 4,
-    padding: 2,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  tabItem: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 3,
-  },
-  tabItemActive: {
-    backgroundColor: '#202226',
-  },
-  tabItemText: {
+  sectionBadge: {
     color: '#555962',
     fontSize: 9,
     fontWeight: '700',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  tileHighlight: {
+    borderColor: 'rgba(255, 85, 0, 0.35)',
+    backgroundColor: 'rgba(255, 85, 0, 0.06)',
+  },
+  tileDanger: {
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  tileTextHighlight: {
+    color: '#FF7722',
+    fontSize: 11,
+    fontWeight: '800',
     letterSpacing: 0.6,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  tabItemTextActive: {
-    color: '#F7F8F8',
+  tileTextDanger: {
+    color: '#FF6B6B',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  chipsRow: {
-    gap: 6,
-    paddingBottom: 4,
+  tileSubText: {
+    color: '#555962',
+    fontSize: 8,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    marginTop: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  chipTile: {
+  tileSubTextHighlight: {
+    color: '#FF9955',
+  },
+  tileSubTextDanger: {
+    color: '#FF8888',
+  },
+  fKeyGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
     gap: 6,
+  },
+  fKeyTile: {
+    flexBasis: '23%',
+    flexGrow: 1,
     backgroundColor: '#121315',
-    paddingHorizontal: 11,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  chipTileText: {
+  fKeyHighlight: {
+    borderColor: 'rgba(255, 85, 0, 0.38)',
+    backgroundColor: 'rgba(255, 85, 0, 0.08)',
+  },
+  fKeyText: {
     color: '#C6CAD0',
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '800',
+    letterSpacing: 0.8,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
-  chipTileArrow: {
+  fKeyTextHighlight: {
+    color: '#FF7722',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  fKeySubText: {
     color: '#555962',
-    fontSize: 10,
+    fontSize: 8,
     fontWeight: '700',
+    letterSpacing: 0.5,
+    marginTop: 2,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  fKeySubHighlight: {
+    color: '#FF9955',
   },
   clearHistoryText: {
     color: '#555962',
