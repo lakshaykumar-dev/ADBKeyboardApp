@@ -101,9 +101,11 @@ function VoiceTextApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isGuideOpen, setIsGuideOpen] = useState(false);
   const [sentHistory, setSentHistory] = useState<SentItem[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
 
   // Animation values
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const recPulseAnim = useRef(new Animated.Value(1)).current;
   const waveBars = useRef([
     new Animated.Value(0.3),
     new Animated.Value(0.7),
@@ -142,6 +144,30 @@ function VoiceTextApp() {
       pulseAnim.setValue(1);
     }
   }, [connectionStatus, pulseAnim]);
+
+  // Pulsing recording indicator
+  useEffect(() => {
+    if (isRecording) {
+      const recLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(recPulseAnim, {
+            toValue: 0.25,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(recPulseAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      recLoop.start();
+      return () => recLoop.stop();
+    } else {
+      recPulseAnim.setValue(1);
+    }
+  }, [isRecording, recPulseAnim]);
 
   // Subtle telemetry waveform animation (Industrial audio indicator)
   useEffect(() => {
@@ -339,6 +365,19 @@ function VoiceTextApp() {
     },
     [triggerHaptic, sendPacket]
   );
+
+  // Game Bar screen recording handlers
+  const handleToggleRecord = useCallback(() => {
+    triggerHaptic();
+    sendPacket({ type: 'shortcut', keys: ['win', 'alt', 'r'] });
+    setIsRecording((prev) => !prev);
+  }, [triggerHaptic, sendPacket]);
+
+  const handleStopRecord = useCallback(() => {
+    triggerHaptic();
+    sendPacket({ type: 'shortcut', keys: ['win', 'alt', 'r'] });
+    setIsRecording(false);
+  }, [triggerHaptic, sendPacket]);
 
   const charCount = bufferText.length;
   const wordCount = bufferText.trim() === '' ? 0 : bufferText.trim().split(/\s+/).length;
@@ -645,6 +684,96 @@ function VoiceTextApp() {
                   )}
                 </TouchableOpacity>
               ))}
+            </View>
+          </View>
+
+          {/* Capture & Game Bar Deck */}
+          <View style={styles.sectionWrap}>
+            <View style={styles.sectionHeaderRow}>
+              <View style={styles.sectionTitleWithDot}>
+                <Text style={styles.sectionLabel}>CAPTURE & GAME BAR</Text>
+                {isRecording && (
+                  <Animated.View
+                    style={[styles.recLiveDot, { opacity: recPulseAnim }]}
+                  />
+                )}
+              </View>
+              <Text style={[styles.sectionBadge, isRecording && styles.badgeRecActive]}>
+                {isRecording ? '● RECORDING LIVE' : 'WIN + ALT + R'}
+              </Text>
+            </View>
+            <View style={styles.tactileGrid}>
+              {/* Record Start Button */}
+              <TouchableOpacity
+                style={[
+                  styles.tactileTile,
+                  styles.recTile,
+                  isRecording && styles.recTileActive,
+                ]}
+                onPress={handleToggleRecord}
+                activeOpacity={0.65}
+              >
+                <View style={styles.recLabelRow}>
+                  <Animated.View
+                    style={[
+                      styles.recDotGlyph,
+                      isRecording && { opacity: recPulseAnim },
+                    ]}
+                  />
+                  <Text style={[styles.tileTextActive, styles.recBtnText]}>
+                    {isRecording ? 'RECORDING' : 'REC START'}
+                  </Text>
+                </View>
+                <Text style={[styles.tileSubText, styles.recSubText]}>
+                  WIN+ALT+R
+                </Text>
+              </TouchableOpacity>
+
+              {/* Record Stop Button */}
+              <TouchableOpacity
+                style={[
+                  styles.tactileTile,
+                  styles.stopTile,
+                  !isRecording && styles.stopTileIdle,
+                ]}
+                onPress={handleStopRecord}
+                activeOpacity={0.65}
+              >
+                <View style={styles.recLabelRow}>
+                  <Text style={styles.stopSquareGlyph}>■</Text>
+                  <Text
+                    style={[
+                      styles.tileTextActive,
+                      isRecording ? styles.stopBtnTextActive : styles.stopBtnText,
+                    ]}
+                  >
+                    REC STOP
+                  </Text>
+                </View>
+                <Text style={styles.tileSubText}>
+                  STOP CLIP
+                </Text>
+              </TouchableOpacity>
+
+              {/* Game Bar Overlay */}
+              <TouchableOpacity
+                style={styles.tactileTile}
+                onPress={() => handleKeyAction(['win', 'g'])}
+                activeOpacity={0.65}
+              >
+                <Text style={styles.tileText}>GAME BAR</Text>
+                <Text style={styles.tileSubText}>WIN + G</Text>
+              </TouchableOpacity>
+
+              {/* Windows Snipping / Screenshot */}
+              <TouchableOpacity
+                style={styles.tactileTile}
+                onPress={() => handleKeyAction(['win', 'shift', 's'])}
+                activeOpacity={0.65}
+              >
+                <Text style={styles.tileText}>SCREENSHOT</Text>
+                <Text style={styles.tileSubText}>WIN+SHIFT+S</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -1261,6 +1390,71 @@ const styles = StyleSheet.create({
   },
   fKeySubHighlight: {
     color: '#FF9955',
+  },
+  sectionTitleWithDot: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  recLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#EF4444',
+  },
+  badgeRecActive: {
+    color: '#EF4444',
+  },
+  recTile: {
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+  },
+  recTileActive: {
+    borderColor: '#EF4444',
+    backgroundColor: 'rgba(239, 68, 68, 0.22)',
+  },
+  recLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  recDotGlyph: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#EF4444',
+  },
+  recBtnText: {
+    color: '#FF6B6B',
+  },
+  recSubText: {
+    color: '#FFAAAA',
+  },
+  stopTile: {
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    backgroundColor: '#151619',
+  },
+  stopTileIdle: {
+    opacity: 0.6,
+  },
+  stopSquareGlyph: {
+    color: '#EF4444',
+    fontSize: 9,
+    fontWeight: '900',
+  },
+  stopBtnText: {
+    color: '#8A8F98',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  stopBtnTextActive: {
+    color: '#F7F8F8',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   clearHistoryText: {
     color: '#555962',
